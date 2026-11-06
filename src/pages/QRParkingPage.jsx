@@ -38,6 +38,7 @@ export const QRParkingPage = () => {
 
   // Live Camera Stream State
   const videoRef = useRef(null);
+  const streamRef = useRef(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState('');
 
@@ -70,31 +71,73 @@ export const QRParkingPage = () => {
   const startCamera = async () => {
     setCameraError('');
     try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-        }
-        setIsCameraActive(true);
-      } else {
-        setCameraError('Camera API is not supported in this browser environment.');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera access requires a secure HTTPS connection or modern browser.');
       }
+
+      // Try environment (rear) camera on mobile, fallback to any camera
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+      }
+
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('autoplay', 'true');
+        videoRef.current.setAttribute('muted', 'true');
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('Video play triggered on metadata load:', playErr);
+        }
+      }
+
+      setIsCameraActive(true);
     } catch (err) {
-      setCameraError('Camera access unavailable or permission denied. You can enter the placard code manually.');
+      console.error('Camera startup error:', err);
+      const isDenied = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError';
+      setCameraError(
+        isDenied
+          ? 'Camera permission was denied. Please allow camera permissions in your browser bar.'
+          : `Camera unavailable (${err.message || 'Busy or not found'}). You can use the manual code entry.`
+      );
     }
   };
 
   const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
+    if (streamRef.current) {
+      const tracks = streamRef.current.getTracks();
       tracks.forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
     setIsCameraActive(false);
   };
+
+  // Sync stream to video element whenever camera becomes active
+  useEffect(() => {
+    if (isCameraActive && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [isCameraActive]);
 
   useEffect(() => {
     return () => {
@@ -215,15 +258,24 @@ export const QRParkingPage = () => {
               {/* Scanning laser line animation */}
               <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-lg shadow-emerald-400 animate-scan pointer-events-none z-10" />
 
-              {/* Live WebCam Video or Standby Graphic */}
-              {isCameraActive ? (
-                <video
-                  ref={videoRef}
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
-                />
-              ) : (
+              {/* Live WebCam Video (Always mounted to guarantee ref availability on mobile) */}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                onLoadedMetadata={() => {
+                  if (videoRef.current) {
+                    videoRef.current.play().catch((e) => console.warn('Play error on metadata:', e));
+                  }
+                }}
+                className={`w-full h-full object-cover transition-opacity duration-300 ${
+                  isCameraActive ? 'opacity-100' : 'hidden opacity-0 pointer-events-none'
+                }`}
+              />
+
+              {/* Standby Graphic when camera is off */}
+              {!isCameraActive && (
                 <div className="text-center p-4">
                   <div className="w-24 h-24 mx-auto bg-white p-2 rounded-xl shadow-lg flex items-center justify-center">
                     <div className="w-full h-full bg-slate-950 rounded p-1 flex flex-col justify-between">
