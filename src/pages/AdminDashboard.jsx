@@ -9,7 +9,12 @@ import {
   RefreshCw,
   Layers,
   TrendingUp,
-  FileText
+  FileText,
+  MapPin,
+  LocateFixed,
+  ExternalLink,
+  Zap,
+  Navigation
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useParking } from '../context/ParkingContext';
@@ -24,10 +29,15 @@ export const AdminDashboard = () => {
   const { currentUser } = useAuth();
   const {
     slots,
+    locations,
     violations,
     allSessions,
     systemLogs,
     stats,
+    userLocation,
+    isDetectingLocation,
+    detectUserLocation,
+    addParkingLocation,
     updateSlotStatus,
     updateViolationStatus,
     endParking,
@@ -35,7 +45,7 @@ export const AdminDashboard = () => {
     resetToDefaultData
   } = useParking();
 
-  const [activeTab, setActiveTab] = useState('OVERVIEW'); // OVERVIEW | SLOTS | SESSIONS | VIOLATIONS | LOGS
+  const [activeTab, setActiveTab] = useState('OVERVIEW'); // OVERVIEW | SLOTS | LOCATIONS | SESSIONS | VIOLATIONS | LOGS
 
   // Slot Management Filters
   const [slotZoneFilter, setSlotZoneFilter] = useState('ALL');
@@ -52,6 +62,51 @@ export const AdminDashboard = () => {
     level: 'Ground Floor',
     type: 'Standard'
   });
+
+  // Add Location Allotment Modal State (Admin Controlled)
+  const [isAddLocationOpen, setIsAddLocationOpen] = useState(false);
+  const [newLocationData, setNewLocationData] = useState({
+    name: '',
+    zone: 'Zone F',
+    address: 'Vishwakarma University (VU Pune), Kondhwa',
+    lat: '18.4603133',
+    lng: '73.8835838',
+    totalSlots: 6,
+    hasEV: false,
+    isCovered: false,
+    securityLevel: 'Campus Guarded Gate'
+  });
+
+  const handleCaptureLocationPin = async () => {
+    try {
+      const loc = await detectUserLocation();
+      setNewLocationData((prev) => ({
+        ...prev,
+        lat: loc.lat.toFixed(7),
+        lng: loc.lng.toFixed(7)
+      }));
+    } catch (err) {
+      alert(err.message || 'Could not acquire GPS pin.');
+    }
+  };
+
+  const handleAddLocationSubmit = (e) => {
+    e.preventDefault();
+    if (!newLocationData.name) return;
+    addParkingLocation(newLocationData);
+    setIsAddLocationOpen(false);
+    setNewLocationData({
+      name: '',
+      zone: `Zone ${String.fromCharCode(65 + locations.length)}`,
+      address: 'Vishwakarma University (VU Pune), Kondhwa',
+      lat: '18.4603133',
+      lng: '73.8835838',
+      totalSlots: 6,
+      hasEV: false,
+      isCovered: false,
+      securityLevel: 'Campus Guarded Gate'
+    });
+  };
 
   // Calculate Active Sessions
   const activeSessionsList = allSessions.filter((s) => s.status === 'active');
@@ -114,11 +169,20 @@ export const AdminDashboard = () => {
         {/* Quick Actions in Header */}
         <div className="relative z-10 flex flex-wrap items-center gap-3 self-start md:self-auto">
           <button
+            onClick={() => setIsAddLocationOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-1.5 active:scale-95"
+            title="Allot a new campus parking sector"
+          >
+            <MapPin className="w-4 h-4" />
+            <span>Allot Parking Hub</span>
+          </button>
+
+          <button
             onClick={() => setIsAddSlotOpen(true)}
             className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-1.5 active:scale-95"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Parking Slot</span>
+            <span>Add Slot</span>
           </button>
 
           <button
@@ -178,6 +242,7 @@ export const AdminDashboard = () => {
         {[
           { id: 'OVERVIEW', label: 'Operations Overview', icon: Layers },
           { id: 'SLOTS', label: `Slot Management (${slots.length})`, icon: Car },
+          { id: 'LOCATIONS', label: `Campus Hubs (${locations.length})`, icon: MapPin },
           { id: 'SESSIONS', label: `Active Sessions (${activeSessionsList.length})`, icon: Clock },
           { id: 'VIOLATIONS', label: `Violations Registry (${violations.length})`, icon: ShieldAlert, alert: stats.activeViolationsCount > 0 },
           { id: 'LOGS', label: 'System Audit Logs', icon: FileText }
@@ -412,6 +477,107 @@ export const AdminDashboard = () => {
                 showAdminControls={true}
                 onAdminToggle={updateSlotStatus}
               />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB: PARKING HUBS & LOCATION ALLOTMENT (Admin Controlled) */}
+      {activeTab === 'LOCATIONS' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 font-mono">
+                  Allotment Authority
+                </span>
+                <span className="text-slate-300">•</span>
+                <span className="text-xs text-slate-500 font-medium">Campus Infrastructure</span>
+              </div>
+              <h3 className="text-lg font-bold text-slate-900">
+                Vishwakarma University Parking Locations & Sectors
+              </h3>
+              <p className="text-xs text-slate-500">
+                Admin control to allot new campus parking facilities, set real GPS coordinates, and provision bays.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsAddLocationOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 self-start sm:self-auto active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Allot New Campus Hub</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {locations.map((loc) => (
+              <div
+                key={loc.id}
+                className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-extrabold px-2.5 py-1 rounded-lg bg-slate-900 text-white">
+                      {loc.zone}
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md font-bold">
+                      {loc.totalSlots} Allotted Bays
+                    </span>
+                  </div>
+
+                  <div>
+                    <h4 className="text-base font-bold text-slate-900">{loc.name}</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">{loc.address}</p>
+                  </div>
+
+                  {loc.lat && loc.lng && (
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-[11px] font-mono">
+                      <span className="text-slate-500 flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                        GPS Pin:
+                      </span>
+                      <span className="font-bold text-slate-800">
+                        {loc.lat.toFixed(5)}°N, {loc.lng.toFixed(5)}°E
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
+                    {loc.hasEV && (
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold">
+                        ⚡ EV Charging
+                      </span>
+                    )}
+                    {loc.isCovered && (
+                      <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[10px] font-bold">
+                        ☂️ Covered Roof
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px]">
+                      {loc.securityLevel || 'Patrolled'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-xs text-slate-500">
+                    <strong className="text-emerald-600 font-mono font-bold text-sm">
+                      {loc.availableSlots}
+                    </strong>{' '}
+                    bays currently open
+                  </span>
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${loc.lat},${loc.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1"
+                  >
+                    <span>Test Route</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
             ))}
           </div>
         </div>
@@ -662,6 +828,147 @@ export const AdminDashboard = () => {
               className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
             >
               Commission Slot
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Allot New Location Hub (Admin Controlled) */}
+      <Modal
+        isOpen={isAddLocationOpen}
+        onClose={() => setIsAddLocationOpen(false)}
+        title="Allot New Campus Parking Facility"
+      >
+        <form onSubmit={handleAddLocationSubmit} className="space-y-4 text-xs">
+          <p className="text-slate-500 text-[11px]">
+            Commission a new parking sector for Vishwakarma University campus. Initial bays will be automatically generated with QR identifiers.
+          </p>
+
+          <div>
+            <label className="block font-bold text-slate-800 mb-1">Facility / Hub Name</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. VU Architecture & Design Workshop Bay"
+              value={newLocationData.name}
+              onChange={(e) => setNewLocationData((prev) => ({ ...prev, name: e.target.value }))}
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-bold text-slate-800 mb-1">Campus Zone</label>
+              <input
+                type="text"
+                required
+                placeholder="Zone F"
+                value={newLocationData.zone}
+                onChange={(e) => setNewLocationData((prev) => ({ ...prev, zone: e.target.value }))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-800 mb-1">Initial Bays to Allot</label>
+              <input
+                type="number"
+                min="1"
+                max="24"
+                value={newLocationData.totalSlots}
+                onChange={(e) => setNewLocationData((prev) => ({ ...prev, totalSlots: e.target.value }))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-bold text-slate-800 mb-1">Campus Address / Pillar Landmark</label>
+            <input
+              type="text"
+              value={newLocationData.address}
+              onChange={(e) => setNewLocationData((prev) => ({ ...prev, address: e.target.value }))}
+              placeholder="VU Kondhwa Campus, West Block"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+            />
+          </div>
+
+          {/* GPS Coordinates with Quick Pin Capture */}
+          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                Real GPS Coordinates
+              </span>
+              <button
+                type="button"
+                onClick={handleCaptureLocationPin}
+                disabled={isDetectingLocation}
+                className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold text-[10px] flex items-center gap-1"
+              >
+                <LocateFixed className={`w-3 h-3 ${isDetectingLocation ? 'animate-spin' : ''}`} />
+                <span>{isDetectingLocation ? 'Pinning...' : 'Capture Current Pin'}</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-mono text-slate-500 block">Latitude</label>
+                <input
+                  type="text"
+                  required
+                  value={newLocationData.lat}
+                  onChange={(e) => setNewLocationData((prev) => ({ ...prev, lat: e.target.value }))}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-mono bg-white"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono text-slate-500 block">Longitude</label>
+                <input
+                  type="text"
+                  required
+                  value={newLocationData.lng}
+                  onChange={(e) => setNewLocationData((prev) => ({ ...prev, lng: e.target.value }))}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-mono bg-white"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 pt-1">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newLocationData.hasEV}
+                onChange={(e) => setNewLocationData((prev) => ({ ...prev, hasEV: e.target.checked }))}
+                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="text-slate-700">EV Station</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newLocationData.isCovered}
+                onChange={(e) => setNewLocationData((prev) => ({ ...prev, isCovered: e.target.checked }))}
+                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="text-slate-700">Covered Structure</span>
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setIsAddLocationOpen(false)}
+              className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-md shadow-indigo-600/20"
+            >
+              Allot Facility & Provision Bays
             </button>
           </div>
         </form>

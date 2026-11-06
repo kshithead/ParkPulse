@@ -104,6 +104,18 @@ export const ParkingProvider = ({ children }) => {
     }
   });
 
+  // GPS User Live Location State
+  const [userLocation, setUserLocation] = useState(() => {
+    try {
+      const stored = localStorage.getItem('parkpulse_user_location');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [locationError, setLocationError] = useState('');
+
   // System Audit & Transaction logs
   const [systemLogs, setSystemLogs] = useState(() => {
     try {
@@ -424,6 +436,99 @@ export const ParkingProvider = ({ children }) => {
   };
 
   /**
+   * User: Detect live GPS location
+   */
+  const detectUserLocation = () => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        const msg = 'Geolocation is not supported by your browser';
+        setLocationError(msg);
+        reject(new Error(msg));
+        return;
+      }
+      setIsDetectingLocation(true);
+      setLocationError('');
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const loc = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            timestamp: position.timestamp
+          };
+          setUserLocation(loc);
+          localStorage.setItem('parkpulse_user_location', JSON.stringify(loc));
+          setIsDetectingLocation(false);
+          addSystemLog(`GPS location acquired (${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}).`, 'info', 'Geospatial');
+          resolve(loc);
+        },
+        (error) => {
+          setIsDetectingLocation(false);
+          let msg = 'Could not retrieve your GPS location.';
+          if (error.code === 1) msg = 'Location permission was denied. Please allow location in your browser.';
+          if (error.code === 2) msg = 'Position unavailable. Make sure your device GPS is turned on.';
+          if (error.code === 3) msg = 'Location request timed out.';
+          setLocationError(msg);
+          reject(new Error(msg));
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      );
+    });
+  };
+
+  /**
+   * Admin: Allot new parking location and automatically provision bays
+   */
+  const addParkingLocation = (locationData) => {
+    const newLoc = {
+      id: 'loc-' + Date.now(),
+      zone: locationData.zone || `Zone ${String.fromCharCode(65 + locations.length)}`,
+      name: locationData.name,
+      address: locationData.address || 'Vishwakarma University Campus, Kondhwa, Pune',
+      lat: parseFloat(locationData.lat) || 18.4603133,
+      lng: parseFloat(locationData.lng) || 73.8835838,
+      distanceKm: 0.2,
+      walkingTimeMin: 2,
+      driveTimeMin: 1,
+      totalSlots: parseInt(locationData.totalSlots, 10) || 6,
+      availableSlots: parseInt(locationData.totalSlots, 10) || 6,
+      tags: locationData.tags || ['VU Campus', 'QR Enabled'],
+      hasEV: Boolean(locationData.hasEV),
+      isCovered: Boolean(locationData.isCovered),
+      securityLevel: locationData.securityLevel || 'Patrolled Area',
+      coordinates: { x: Math.floor(Math.random() * 50) + 25, y: Math.floor(Math.random() * 50) + 25 },
+      rating: 5.0
+    };
+
+    setLocations((prev) => [...prev, newLoc]);
+
+    // Provision initial bays for this new lot
+    const slotsCount = newLoc.totalSlots;
+    const zoneLetter = newLoc.zone.replace('Zone ', '').trim() || 'X';
+    const newSlots = [];
+    for (let i = 1; i <= slotsCount; i++) {
+      const codeNumber = (slots.length + i).toString().padStart(3, '0');
+      newSlots.push({
+        id: `s-${Date.now()}-${i}`,
+        code: `P${codeNumber}`,
+        zone: newLoc.zone,
+        zoneName: newLoc.name,
+        level: locationData.level || 'Ground Floor',
+        type: i === 1 && newLoc.hasEV ? 'EV Charging' : 'Standard',
+        status: 'available',
+        isEV: i === 1 && newLoc.hasEV,
+        isAccessible: i === 2,
+        qrPlacardId: `QR-${zoneLetter}-${codeNumber}`,
+        occupiedBy: null
+      });
+    }
+
+    setSlots((prev) => [...prev, ...newSlots]);
+    addSystemLog(`Admin alloted new parking hub: "${newLoc.name}" (${newLoc.zone}) with ${slotsCount} slots.`, 'success', 'Admin-Allotment');
+    return newLoc;
+  };
+
+  /**
    * Reset data back to default mock state
    */
   const resetToDefaultData = () => {
@@ -476,6 +581,11 @@ export const ParkingProvider = ({ children }) => {
     updateViolationStatus,
     updateSlotStatus,
     addSlot,
+    userLocation,
+    isDetectingLocation,
+    locationError,
+    detectUserLocation,
+    addParkingLocation,
     resetToDefaultData,
     addSystemLog
   };
