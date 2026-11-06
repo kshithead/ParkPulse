@@ -41,6 +41,7 @@ export const QRParkingPage = () => {
   const streamRef = useRef(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState('');
+  const [facingMode, setFacingMode] = useState('environment'); // 'environment' (back) or 'user' (front)
 
   // Quick preset sample QR codes
   const samplePresets = ['P001', 'P002', 'P003', 'P004', 'P007', 'P013'];
@@ -67,26 +68,30 @@ export const QRParkingPage = () => {
     lookupSlot(inputCode);
   }, [slots]);
 
-  // Turn on/off device webcam or mobile camera
-  const startCamera = async () => {
+  // Turn on device webcam or mobile camera
+  const startCamera = async (targetFacing) => {
+    const facing = typeof targetFacing === 'string' ? targetFacing : facingMode;
     setCameraError('');
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera access requires a secure HTTPS connection or modern browser.');
+        throw new Error('Camera API requires HTTPS or is unsupported on this mobile browser.');
       }
 
-      // Try environment (rear) camera on mobile, fallback to any camera
+      // Stop any existing active track
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+
       let stream;
       try {
+        // Attempt preferred camera (rear by default)
         stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
+          video: { facingMode: { ideal: facing } },
           audio: false
         });
-      } catch {
+      } catch (err1) {
+        console.warn('Preferred camera constraint failed, falling back to any camera:', err1);
         stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: false
@@ -95,15 +100,24 @@ export const QRParkingPage = () => {
 
       streamRef.current = stream;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true');
-        videoRef.current.setAttribute('autoplay', 'true');
-        videoRef.current.setAttribute('muted', 'true');
+      const video = videoRef.current;
+      if (video) {
+        video.muted = true;
+        video.playsInline = true;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.setAttribute('autoplay', 'true');
+        video.setAttribute('muted', 'true');
+        video.srcObject = stream;
+
+        video.onloadedmetadata = () => {
+          video.play().catch((playErr) => console.warn('Play error on metadata:', playErr));
+        };
+
         try {
-          await videoRef.current.play();
-        } catch (playErr) {
-          console.warn('Video play triggered on metadata load:', playErr);
+          await video.play();
+        } catch (e) {
+          console.warn('Immediate play deferred to metadata load:', e);
         }
       }
 
@@ -113,16 +127,16 @@ export const QRParkingPage = () => {
       const isDenied = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError';
       setCameraError(
         isDenied
-          ? 'Camera permission was denied. Please allow camera permissions in your browser bar.'
-          : `Camera unavailable (${err.message || 'Busy or not found'}). You can use the manual code entry.`
+          ? 'Camera permission was denied in your browser. Please tap the lock icon in your address bar and allow Camera access.'
+          : `Could not access camera (${err.message || 'Device camera busy'}). You can use manual code entry.`
       );
+      setIsCameraActive(false);
     }
   };
 
   const stopCamera = () => {
     if (streamRef.current) {
-      const tracks = streamRef.current.getTracks();
-      tracks.forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
     if (videoRef.current) {
@@ -131,13 +145,19 @@ export const QRParkingPage = () => {
     setIsCameraActive(false);
   };
 
-  // Sync stream to video element whenever camera becomes active
-  useEffect(() => {
-    if (isCameraActive && videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => {});
+  const toggleCameraFacing = async () => {
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextFacing);
+    if (isCameraActive) {
+      await startCamera(nextFacing);
     }
-  }, [isCameraActive]);
+  };
+
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -248,35 +268,30 @@ export const QRParkingPage = () => {
             </div>
 
             {/* Viewfinder Window */}
-            <div className="relative mt-6 aspect-square max-w-[280px] mx-auto rounded-2xl border-2 border-dashed border-emerald-500/40 bg-slate-900/80 flex items-center justify-center overflow-hidden">
+            <div className="relative mt-6 aspect-square max-w-[280px] w-full mx-auto rounded-2xl border-2 border-dashed border-emerald-500/40 bg-slate-900 overflow-hidden">
               {/* Corner brackets */}
-              <div className="absolute top-2 left-2 w-6 h-6 border-t-2 border-l-2 border-emerald-400 z-10" />
-              <div className="absolute top-2 right-2 w-6 h-6 border-t-2 border-r-2 border-emerald-400 z-10" />
-              <div className="absolute bottom-2 left-2 w-6 h-2 border-b-2 border-l-2 border-emerald-400 z-10" />
-              <div className="absolute bottom-2 right-2 w-6 h-6 border-b-2 border-r-2 border-emerald-400 z-10" />
+              <div className="absolute top-2 left-2 w-6 h-6 border-t-2 border-l-2 border-emerald-400 z-20 pointer-events-none" />
+              <div className="absolute top-2 right-2 w-6 h-6 border-t-2 border-r-2 border-emerald-400 z-20 pointer-events-none" />
+              <div className="absolute bottom-2 left-2 w-6 h-6 border-b-2 border-l-2 border-emerald-400 z-20 pointer-events-none" />
+              <div className="absolute bottom-2 right-2 w-6 h-6 border-b-2 border-r-2 border-emerald-400 z-20 pointer-events-none" />
 
               {/* Scanning laser line animation */}
-              <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-lg shadow-emerald-400 animate-scan pointer-events-none z-10" />
+              <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-lg shadow-emerald-400 animate-scan pointer-events-none z-20" />
 
-              {/* Live WebCam Video (Always mounted to guarantee ref availability on mobile) */}
+              {/* Live WebCam Video */}
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
-                onLoadedMetadata={() => {
-                  if (videoRef.current) {
-                    videoRef.current.play().catch((e) => console.warn('Play error on metadata:', e));
-                  }
-                }}
-                className={`w-full h-full object-cover transition-opacity duration-300 ${
-                  isCameraActive ? 'opacity-100' : 'hidden opacity-0 pointer-events-none'
+                className={`absolute inset-0 w-full h-full object-cover z-10 ${
+                  isCameraActive ? 'block' : 'hidden'
                 }`}
               />
 
               {/* Standby Graphic when camera is off */}
               {!isCameraActive && (
-                <div className="text-center p-4">
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-4 z-10">
                   <div className="w-24 h-24 mx-auto bg-white p-2 rounded-xl shadow-lg flex items-center justify-center">
                     <div className="w-full h-full bg-slate-950 rounded p-1 flex flex-col justify-between">
                       <div className="flex justify-between">
@@ -292,7 +307,7 @@ export const QRParkingPage = () => {
                       </div>
                     </div>
                   </div>
-                  <p className="text-[11px] font-mono text-slate-400 mt-3">
+                  <p className="text-[11px] font-mono text-slate-400 mt-3 text-center">
                     Point camera at parking bay QR placard
                   </p>
                 </div>
@@ -311,30 +326,41 @@ export const QRParkingPage = () => {
             {!isCameraActive ? (
               <button
                 type="button"
-                onClick={startCamera}
+                onClick={() => startCamera(facingMode)}
                 className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
               >
                 <Video className="w-4 h-4" />
                 <span>Open Device Camera</span>
               </button>
             ) : (
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleSimulateScan}
-                  className="flex-1 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg transition-all flex items-center justify-center gap-2"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Scan Placard</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={stopCamera}
-                  className="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                >
-                  <VideoOff className="w-4 h-4" />
-                  <span>Close</span>
-                </button>
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSimulateScan}
+                    className="flex-1 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg transition-all flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Scan Placard</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleCameraFacing}
+                    className="px-3 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                    title="Flip camera"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>Flip</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="px-3 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all flex items-center justify-center"
+                    title="Close camera"
+                  >
+                    <VideoOff className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             )}
             <p className="text-[10px] text-slate-400 text-center">
